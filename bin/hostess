@@ -1,0 +1,155 @@
+#!/usr/bin/env node
+var fs = require('fs');
+var path = require('path');
+var kexec = require('kexec');
+
+var README_FILENAME = '/README';
+var HOSTS_FILENAME = '/etc/hosts';
+var ORIGINAL_SET_NAME = 'original';
+var SET_FILE_EXTENSION_REGEX = /\.set$/;
+var TEMPLATE_SET = [
+  '# Host set created by hostess',
+  '127.0.0.1 localhost',
+  '255.255.255.255 broadcasthost',
+  '::1             localhost',
+  'fe80::1%lo0 localhost'
+].join("\n");
+var README_CONTENTS = 'Created by Hostess\nhttps://github.com/shinypb/hostess\n';
+
+// Exit codes
+var ERR_WRONG_ARGUMENT_COUNT = 1;
+var ERR_INVALID_COMMAND = 2;
+var ERR_INVALID_ENVIRONMENT = 3;
+var ERR_DIRECTORY_IS_A_FILE = 4;
+var ERR_DIRECTORY_CREATE_FAILED = 5;
+var ERR_SET_ALREDY_EXISTS = 6;
+var ERR_SET_NOT_FOUND = 7;
+var ERR_NOT_ROOT = 8;
+
+if (process.argv.length != 4) {
+  console.log("usage: hostess [command] [name]");
+  console.log('');
+  console.log('Commands:');
+  console.log('  hostess create [name] : creates a new /etc/hosts set with the given name');
+  console.log('  hostess delete [name] : deletes the /etc/hosts set with the given name');
+  console.log('  hostess edit [name]   : edits the /etc/hosts set with the given name');
+  console.log('  hostess list          : shows all available set names');
+  console.log('  hostess uses [name]   : uses the /etc/hosts set with the given name');
+  console.log('');
+
+  process.exit(ERR_WRONG_ARGUMENT_COUNT);
+}
+
+function validateEnvironment() {
+  ['EDITOR', 'HOME'].forEach(function(variableName) {
+    if (!process.env[variableName]) {
+      console.error("Missing " + variableName + " environment variable.");
+      process.exit(ERR_INVALID_ENVIRONMENT);
+    }
+  });
+}
+
+var HOSTESS_DIR = process.env.HOSTESS_DIR || (process.env.HOME + '/.hostess');
+function ensureHostessDirectoryExists() {
+  if (fs.existsSync(HOSTESS_DIR)) {
+    var stats = fs.lstatSync(HOSTESS_DIR);
+    if (!stats.isDirectory()) {
+      console.error('Configuration path ' + HOSTESS_DIR + ' exists, but is not a directory.');
+      process.exit(ERR_DIRECTORY_IS_A_FILE);
+    }
+  } else {
+    fs.mkdirSync(HOSTESS_DIR);
+    if (!fs.existsSync(HOSTESS_DIR)) {
+      console.log('Failed to create configuration directory at ' + HOSTESS_DIR);
+      process.exit(ERR_DIRECTORY_CREATE_FAILED);
+    }
+
+    //  Add a readme
+    fs.writeFileSync(HOSTESS_DIR + '/' + README_FILENAME, README_CONTENTS);
+
+    //  Copy the current /etc/hosts file in there
+    var originalHostsData = fs.readFileSync(HOSTS_FILENAME);
+    fs.writeFileSync(filenameForSet(ORIGINAL_SET_NAME), originalHostsData);
+  }
+}
+
+function availableSets() {
+  return fs.readdirSync(HOSTESS_DIR).filter(function(filename) {
+    return !!filename.match(SET_FILE_EXTENSION_REGEX);
+  }).map(function(filename) {
+    return filename.replace(SET_FILE_EXTENSION_REGEX, '');
+  });
+}
+
+function filenameForSet(setName) {
+  return HOSTESS_DIR + '/' + setName + '.set';
+}
+
+function setExists(setName) {
+  return availableSets().indexOf(setName) >= 0;
+}
+
+function ensureSetExists(setName) {
+  if (!setExists(setName)) {
+    console.error("There is no set called " + setName + ".");
+    console.error("Try 'hostess create " + setName + "' first?");
+    return process.exit(ERR_SET_NOT_FOUND);
+  }
+}
+
+function getSetData(setName) {
+  return fs.readFileSync(filenameForSet(setName), { encoding: 'utf8' });
+}
+
+var commands = {
+  'create': function(setName) {
+    if (setExists(setName)) {
+      console.error("There is already a set with that name.");
+      console.error("Try 'hostess edit " + setName + "' instead?");
+      return process.exit(ERR_SET_ALREDY_EXISTS);
+    }
+
+    fs.writeFileSync(filenameForSet(setName), TEMPLATE_SET);
+    this.edit(setName);
+
+    console.log('Created a new called ' + setName + '.');
+    console.log("Use 'hostess set " + setName + "' to activate it.");
+  },
+  'delete': function(setName) {
+    ensureSetExists(setName);
+
+    fs.unlinkSync(filenameForSet(setName));
+  },
+  'edit': function(setName) {
+    ensureSetExists(setName);
+
+    kexec(process.env.EDITOR, [filenameForSet(setName)]);
+  },
+  'list': function() {
+    console.log(availableSets().join('\n'));
+  },
+  'show': function(setName) {
+    ensureSetExists(setName);
+    console.log(getSetData(setName));
+  },
+  'use': function(setName) {
+    ensureSetExists(setName);
+    if (process.getuid() !== 0) {
+      console.log("Try 'sudo hostess use " + setName + "' instead.");
+      process.exit(ERR_NOT_ROOT);
+    }
+
+    fs.writeFileSync(HOSTS_FILENAME, getSetData(setName));
+  },
+};
+
+var commandName = process.argv[2];
+var setName = process.argv[3];
+if (commands.hasOwnProperty(commandName)) {
+  validateEnvironment();
+  ensureHostessDirectoryExists();
+  commands[commandName](setName);
+} else {
+  console.error("Not sure how to " + process.argv[2] + ", sorry. :(");
+  process.exit(ERR_INVALID_COMMAND);
+}

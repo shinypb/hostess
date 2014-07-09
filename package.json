@@ -1,0 +1,17 @@
+{
+  "name": "hostsess",
+  "description": "Command-line tool for swapping out /etc/hosts files",
+  "version": "1.0.0",
+  "repository": "https://github.com/shinypb/hostess",
+  "maintainers": [
+    {
+      "name": "Mark Christian",
+      "email": "m@rkchristian.ca",
+      "web": "https://twitter.com/shinypb"
+    }
+  ],
+  "dependencies": {
+    "kexec": "0.2.0",
+    "minimist": "0.2.0"
+  }
+}
