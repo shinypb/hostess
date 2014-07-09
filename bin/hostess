@@ -2,7 +2,7 @@
 var commands = require('../lib/commands');
 var ERRORS = require('../lib/errors');
 
-var commandName = process.argv[2] || 'usage';
+var commandName = process.argv[2] || 'printUsage';
 var commandArgs = process.argv.slice(3);
 
 if (commands.hasOwnProperty(commandName)) {
